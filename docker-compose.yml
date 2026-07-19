@@ -1,0 +1,59 @@
+services:
+  spark-master:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.spark
+    image: imdb-pipeline-spark:3.5.8
+    container_name: spark-master
+    hostname: spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+      - "4040:4040"
+    volumes:
+      - ./data:/mnt/pipeline
+      - ./:/app
+    mem_limit: 1g
+    networks:
+      - pipeline
+
+  spark-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.spark
+    image: imdb-pipeline-spark:3.5.8
+    container_name: spark-worker
+    hostname: spark-worker
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/mnt/pipeline
+      - ./:/app
+    mem_limit: 2560m
+    networks:
+      - pipeline
+
+  starrocks:
+    image: starrocks/allin1-ubuntu
+    container_name: starrocks
+    hostname: starrocks
+    ports:
+      - "9030:9030"
+      - "8030:8030"
+      - "8040:8040"
+    volumes:
+      - ./data:/mnt/pipeline
+    mem_limit: 4g
+    networks:
+      - pipeline
+
+networks:
+  pipeline:
+    driver: bridge

@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+data/bronze/imdb/*.tsv
+data/bronze/imdb/_kaggle_cache/
+data/lake/
+data/benchmark_results.txt
+
+.spark-warehouse/
+metastore_db/
+derby.log
+
+.env
+*.log
