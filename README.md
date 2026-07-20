@@ -51,10 +51,6 @@ From inside Docker (e.g. `benchmark.py` in `spark-master`), the host is `starroc
 
 ## Prerequisites
 
-- Docker Desktop with **12 GB RAM** allocated (Settings → Resources)
-- Python 3.11+ on the host
-- ~25 GB free disk for TSV + Parquet + StarRocks storage
-
 ```bash
 python -m venv venv
 source venv/bin/activate          # Windows: venv\Scripts\activate
