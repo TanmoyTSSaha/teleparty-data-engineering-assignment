@@ -61,6 +61,8 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+
+
 ## Quick start
 
 ```bash
@@ -71,17 +73,13 @@ docker compose up -d --build
 python download.py
 
 # 3. Run ETL on the Spark cluster
-docker exec spark-master /opt/spark/bin/spark-submit \
-  --master spark://spark-master:7077 \
-  /app/etl_job.py
+docker exec spark-master /opt/spark/bin/spark-submit --master spark://spark-master:7077 /app/etl_job.py
 
 # 4. Load gold Parquet into StarRocks
 python load_to_olap.py
 
 # 5. Run Spark vs StarRocks benchmark
-docker exec spark-master /opt/spark/bin/spark-submit \
-  --master spark://spark-master:7077 \
-  /app/benchmark.py
+docker exec spark-master /opt/spark/bin/spark-submit --master spark://spark-master:7077 /app/benchmark.py
 ```
 
 You can also run `python benchmark.py` on the host if PySpark is installed and gold data exists under `data/lake/gold/`.
@@ -109,7 +107,7 @@ If download fails, place all five TSV files in `data/bronze/imdb/` and re-run `p
 - `title.principals.ordering`, `title.principals.job`
 - `name.basics.birthYear`, `deathYear`, `primaryProfession`, `knownForTitles`
 
-**Derived fields on `title_basics`:** `start_decade`, `genres_array`, `primary_genre`.
+**Derived fields on** `title_basics`**:** `start_decade`, `genres_array`, `primary_genre`.
 
 ### Partitioning
 
@@ -140,6 +138,8 @@ All Parquet output uses Snappy compression.
 | Q6    | Average runtime by title type and decade       |
 
 
+
+
 ### Methodology
 
 - Each query runs **3 times** per engine; the reported value is the **median** latency in milliseconds.
@@ -147,6 +147,8 @@ All Parquet output uses Snappy compression.
 - **StarRocks** runs the same SQL against loaded tables in the `imdb` database (Broker Load from gold Parquet).
 - Speedup = Spark median ÷ StarRocks median.
 - Results are written to `data/benchmark_results.txt` (overwritten each run). When run inside Docker, the file appears on the host via the `./data` volume mount.
+
+
 
 ### Sample results (local Docker, 16 GB host RAM)
 
@@ -174,7 +176,5 @@ StarRocks is faster on these workloads because data is columnar, indexed with DU
 | [http://localhost:8081](http://localhost:8081) | Spark worker UI                    |
 | [http://localhost:4040](http://localhost:4040) | Spark application UI (during jobs) |
 | [http://localhost:8030](http://localhost:8030) | StarRocks HTTP API                 |
-
-
 
 

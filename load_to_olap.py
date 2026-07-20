@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import time
 import uuid
 from pathlib import Path
 
 import pymysql
+from tqdm import tqdm
 
 import config
 
@@ -88,8 +90,8 @@ def run_sql_file(conn: pymysql.Connection, path: Path) -> None:
     sql = path.read_text(encoding="utf-8")
     statements = [stmt.strip() for stmt in sql.split(";") if stmt.strip()]
     with conn.cursor() as cursor:
+        logger.info("Executing DDL: %s", path.name)
         for statement in statements:
-            logger.info("Executing DDL: %s", path.name)
             cursor.execute(statement)
 
 
@@ -98,27 +100,73 @@ def apply_schema(conn: pymysql.Connection) -> None:
         run_sql_file(conn, sql_file)
 
 
-def wait_for_load(conn: pymysql.Connection, label: str, timeout_sec: int = 3600) -> None:
+def parse_load_percent(progress: str | None) -> int:
+    """Extract LOAD stage percentage from StarRocks PROGRESS string."""
+    if not progress:
+        return 0
+    match = re.search(r"LOAD:(\d+)%", progress)
+    return int(match.group(1)) if match else 0
+
+
+def wait_for_load(
+    conn: pymysql.Connection,
+    label: str,
+    table_name: str,
+    timeout_sec: int = 3600,
+) -> None:
     deadline = time.time() + timeout_sec
-    while time.time() < deadline:
-        with conn.cursor() as cursor:
-            cursor.execute(
-                "SELECT STATE, ERROR_MSG FROM information_schema.loads "
-                "WHERE LABEL = %s ORDER BY CREATE_TIME DESC LIMIT 1",
-                (label,),
-            )
-            row = cursor.fetchone()
-        if not row:
-            time.sleep(2)
-            continue
-        state, error_msg = row
-        if state == "FINISHED":
-            logger.info("Load %s finished", label)
-            return
-        if state == "CANCELLED":
-            raise RuntimeError(f"Load {label} cancelled: {error_msg}")
-        time.sleep(3)
-    raise TimeoutError(f"Timed out waiting for load {label}")
+    poll_interval_sec = 3
+    last_pct = 0
+    finished = False
+
+    with tqdm(
+        total=100,
+        unit="%",
+        desc=f"Loading {table_name}",
+        disable=not sys.stderr.isatty(),
+        leave=False,
+        file=sys.stderr,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}% [{elapsed}<{remaining}]",
+    ) as pbar:
+        while time.time() < deadline:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT STATE, PROGRESS, ERROR_MSG FROM information_schema.loads "
+                    "WHERE LABEL = %s ORDER BY CREATE_TIME DESC LIMIT 1",
+                    (label,),
+                )
+                row = cursor.fetchone()
+
+            if not row:
+                pbar.set_postfix_str("waiting", refresh=True)
+                time.sleep(2)
+                continue
+
+            state, progress, error_msg = row
+            pct = parse_load_percent(progress)
+
+            if state == "PENDING":
+                pbar.set_postfix_str("pending", refresh=True)
+            elif state == "LOADING":
+                pbar.set_postfix_str(state.lower(), refresh=True)
+                if pct > last_pct:
+                    pbar.update(pct - last_pct)
+                    last_pct = pct
+            elif state == "FINISHED":
+                if last_pct < 100:
+                    pbar.update(100 - last_pct)
+                pbar.set_postfix_str("done", refresh=True)
+                finished = True
+                break
+            elif state == "CANCELLED":
+                raise RuntimeError(f"Load {label} cancelled: {error_msg}")
+
+            time.sleep(poll_interval_sec)
+
+    if not finished:
+        raise TimeoutError(f"Timed out waiting for load {label}")
+
+    logger.info("Loaded %s successfully", table_name)
 
 
 def parquet_glob(path_columns: tuple[str, ...]) -> str:
@@ -144,9 +192,8 @@ def broker_load_table(conn: pymysql.Connection, spec: dict) -> None:
     PROPERTIES ("timeout" = "3600")
     """
     with conn.cursor() as cursor:
-        logger.info("Starting broker load for %s", spec["table"])
         cursor.execute(sql)
-    wait_for_load(conn, label)
+    wait_for_load(conn, label, table_name=spec["table"])
 
 
 def verify_counts(conn: pymysql.Connection) -> None:
@@ -162,6 +209,7 @@ def main() -> int:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+        stream=sys.stdout,
     )
 
     gold_root = Path(
