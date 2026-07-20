@@ -57,8 +57,6 @@ source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-
-
 ## Quick start
 
 ```bash
@@ -134,8 +132,6 @@ All Parquet output uses Snappy compression.
 | Q6    | Average runtime by title type and decade       |
 
 
-
-
 ### Methodology
 
 - Each query runs **3 times** per engine; the reported value is the **median** latency in milliseconds.
@@ -143,8 +139,6 @@ All Parquet output uses Snappy compression.
 - **StarRocks** runs the same SQL against loaded tables in the `imdb` database (Broker Load from gold Parquet).
 - Speedup = Spark median ÷ StarRocks median.
 - Results are written to `data/benchmark_results.txt` (overwritten each run). When run inside Docker, the file appears on the host via the `./data` volume mount.
-
-
 
 ### Sample results (local Docker, 16 GB host RAM)
 
@@ -174,3 +168,16 @@ StarRocks is faster on these workloads because data is columnar, indexed with DU
 | [http://localhost:8030](http://localhost:8030) | StarRocks HTTP API                 |
 
 
+## OLAP engine selection
+
+Comparison for the IMDb workload (~12M titles, ~10M episodes, ~100M cast credits, join-heavy gold tables, Parquet lake output):
+
+| Engine | Pros (IMDb dataset) | Cons (IMDb dataset) |
+| ------ | --------------------- | ------------------- |
+| **StarRocks** | Strong multi-table JOINs (episode ↔ series ↔ ratings); bulk Parquet load; `DUPLICATE KEY` suits denormalized gold tables; fast aggregations on 100M+ `cast_credits` rows | Less ideal if analytics were mostly single-table scans only |
+| ClickHouse | Excellent columnar scans and aggregations on large fact tables (`title.principals`, ratings filters) | JOIN-heavy episode/series analytics are workable but not its primary strength |
+| Apache Doris | Similar MPP model to StarRocks; good JOIN performance on enriched episode and cast tables | Overlaps heavily with StarRocks for this schema with little extra benefit |
+| DuckDB | Reads Parquet directly with minimal setup | No persistent OLAP store — weak fit for “load gold → query OLAP” benchmark pattern |
+| Pinot / Druid / Trino | — | Built for streaming or federated query, not bulk load of batch Parquet gold tables |
+
+**Why StarRocks:** IMDb analytics lean on joined gold tables (`episodes_enriched`, `cast_credits`) and large aggregations (Q2–Q5), not isolated single-table scans. StarRocks handles that join-heavy shape well, loads partitioned gold Parquet into indexed OLAP tables, and supports the same SQL used in `queries/analytics.sql` for a direct Spark vs OLAP benchmark.
